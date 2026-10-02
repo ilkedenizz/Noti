@@ -4,11 +4,11 @@ import { TerminalHeader } from './components/TerminalHeader';
 import { SystemStatus } from './components/SystemStatus';
 import { ConnectionList } from './components/ConnectionList';
 import { CommandTerminal } from './components/CommandTerminal';
-import { INITIAL_CONNECTIONS } from './data/connections';
 import { UserConnection } from './types/terminal';
+import { loadConnections, saveConnections } from './utils/connectionStorage';
 
 export const App: React.FC = () => {
-  const [connections, setConnections] = useState<UserConnection[]>(INITIAL_CONNECTIONS);
+  const [connections, setConnections] = useState<UserConnection[]>(() => loadConnections());
   const [externalCommand, setExternalCommand] = useState<string | null>(null);
 
   const handleCallUser = (handle: string) => {
@@ -21,6 +21,7 @@ export const App: React.FC = () => {
 
   const handleUpdateConnections = (updatedConnections: UserConnection[]) => {
     setConnections(updatedConnections);
+    saveConnections(updatedConnections);
   };
 
   return (
