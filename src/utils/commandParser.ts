@@ -3,6 +3,7 @@ import { CommandContext, CommandExecutionResult } from '../types/terminal';
 type CommandHandler = (args: string[], ctx: CommandContext) => CommandExecutionResult;
 
 const handleHelp: CommandHandler = () => ({
+  actionType: 'NONE',
   logsToAppend: [
     {
       type: 'output',
@@ -17,6 +18,7 @@ const handleStatus: CommandHandler = (_, ctx) => {
   const offline = ctx.connections.filter((u) => u.status === 'OFFLINE').length;
 
   return {
+    actionType: 'NONE',
     logsToAppend: [
       {
         type: 'output',
@@ -28,9 +30,10 @@ const handleStatus: CommandHandler = (_, ctx) => {
 
 const handleUsers: CommandHandler = (_, ctx) => {
   const userLines = ctx.connections
-    .map((u) => `  * ${u.handle.padEnd(8, ' ')} (STATUS: ${u.status})`)
+    .map((u) => `  * ${u.handle.padEnd(8, ' ')} (${u.name.padEnd(5, ' ')}) [STATUS: ${u.status}]`)
     .join('\n');
   return {
+    actionType: 'NONE',
     logsToAppend: [
       {
         type: 'output',
@@ -41,7 +44,7 @@ const handleUsers: CommandHandler = (_, ctx) => {
 };
 
 const handleClear: CommandHandler = () => ({
-  action: 'clear',
+  actionType: 'CLEAR_LOGS',
   logsToAppend: [],
 });
 
@@ -49,6 +52,7 @@ const handleSendAlert: CommandHandler = (args, ctx) => {
   const target = args[0];
   if (!target) {
     return {
+      actionType: 'NONE',
       logsToAppend: [
         {
           type: 'error',
@@ -65,10 +69,11 @@ const handleSendAlert: CommandHandler = (args, ctx) => {
 
   if (!matchedUser) {
     return {
+      actionType: 'NONE',
       logsToAppend: [
         {
           type: 'error',
-          text: `> ERROR: USER_NOT_FOUND. Target '${cleanTarget}' is not in connection network.`,
+          text: `> ERROR: UNKNOWN_USER. Target '${cleanTarget}' is not in connection network.`,
         },
       ],
     };
@@ -76,10 +81,11 @@ const handleSendAlert: CommandHandler = (args, ctx) => {
 
   if (matchedUser.status === 'OFFLINE') {
     return {
+      actionType: 'NONE',
       logsToAppend: [
         {
           type: 'error',
-          text: `> ERROR: TARGET_UNREACHABLE. ${matchedUser.handle} is currently OFFLINE.`,
+          text: `> ERROR: TARGET_UNREACHABLE. ${matchedUser.handle} (${matchedUser.name}) is currently OFFLINE.`,
         },
       ],
     };
@@ -87,32 +93,34 @@ const handleSendAlert: CommandHandler = (args, ctx) => {
 
   if (matchedUser.status === 'BUSY') {
     return {
+      actionType: 'NONE',
       logsToAppend: [
         {
           type: 'output',
-          text: `> ALERT_QUEUED: ${matchedUser.handle} is currently BUSY. High-priority signal queued.`,
+          text: `> ALERT_QUEUED: ${matchedUser.handle} (${matchedUser.name}) is currently BUSY. High-priority signal queued.`,
         },
       ],
     };
   }
 
-  // Target user is READY -> Dispatch alert & transition state to BUSY
+  // User is READY -> Dispatch alert & transition state to BUSY
   const updatedConnections = ctx.connections.map((u) =>
     u.id === matchedUser.id ? { ...u, status: 'BUSY' as const, lastActive: 'NOW' } : u
   );
 
   return {
+    actionType: 'UPDATE_CONNECTIONS',
     updatedConnections,
     logsToAppend: [
       {
         type: 'success',
-        text: `> ALERT_SENT: Emergency signal dispatched to ${matchedUser.handle}. Status updated: [BUSY].`,
+        text: `> ALERT_SENT: Emergency signal dispatched to ${matchedUser.handle} (${matchedUser.name}). Status updated: [BUSY].`,
       },
     ],
   };
 };
 
-// Command Registry Map
+// Pure Command Registry Map
 const COMMAND_REGISTRY: Record<string, CommandHandler> = {
   '/help': handleHelp,
   '/status': handleStatus,
@@ -127,7 +135,7 @@ export function parseAndExecuteCommand(
 ): CommandExecutionResult {
   const trimmed = rawInput.trim();
   if (!trimmed) {
-    return { logsToAppend: [] };
+    return { actionType: 'NONE', logsToAppend: [] };
   }
 
   const parts = trimmed.split(/\s+/);
@@ -143,6 +151,7 @@ export function parseAndExecuteCommand(
 
   if (!handler) {
     return {
+      actionType: 'NONE',
       logsToAppend: [
         commandLog,
         {
@@ -155,7 +164,7 @@ export function parseAndExecuteCommand(
 
   const result = handler(args, ctx);
 
-  if (result.action === 'clear') {
+  if (result.actionType === 'CLEAR_LOGS') {
     return result;
   }
 

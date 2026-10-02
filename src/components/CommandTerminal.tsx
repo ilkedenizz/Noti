@@ -52,12 +52,12 @@ export const CommandTerminal: React.FC<CommandTerminalProps> = ({
     (rawCmd: string) => {
       const result = parseAndExecuteCommand(rawCmd, { connections });
 
-      if (result.action === 'clear') {
+      if (result.actionType === 'CLEAR_LOGS') {
         setLogs([]);
         return;
       }
 
-      if (result.updatedConnections) {
+      if (result.actionType === 'UPDATE_CONNECTIONS' && result.updatedConnections) {
         onUpdateConnections(result.updatedConnections);
       }
 

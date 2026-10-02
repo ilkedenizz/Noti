@@ -26,8 +26,10 @@ export interface LogOutput {
   text: string;
 }
 
+export type CommandActionType = 'NONE' | 'CLEAR_LOGS' | 'UPDATE_CONNECTIONS';
+
 export interface CommandExecutionResult {
-  action?: 'clear';
+  actionType: CommandActionType;
   updatedConnections?: UserConnection[];
   logsToAppend: LogOutput[];
 }
