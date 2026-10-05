@@ -10,6 +10,12 @@
 .svn/
 migrate_working_dir/
 
+# Node / Functions-related
+node_modules/
+**/node_modules/
+functions/lib/
+functions/node_modules/
+
 # IntelliJ-related
 *.iml
 *.ipr
