@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "846520353940",
+    "project_id": "noti-4dd3c",
+    "storage_bucket": "noti-4dd3c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:846520353940:android:335251a7b83c8d2686e081",
+        "android_client_info": {
+          "package_name": "com.noti.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAR_uICdkMOA6GWEmMSFtM_3bzFvXCWIA0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

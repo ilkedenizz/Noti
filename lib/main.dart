@@ -22,7 +22,11 @@ void main() async {
     ),
   );
 
-  await NotificationService().initialize();
+  try {
+    await NotificationService().initialize();
+  } catch (e) {
+    debugPrint('> NOTIFICATION_SERVICE_INIT_ERROR: $e');
+  }
 
   runApp(const NotiApp());
 }

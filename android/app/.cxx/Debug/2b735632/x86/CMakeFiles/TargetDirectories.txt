@@ -1,2 +1,0 @@
-C:/dev/noti_mobile/android/app/.cxx/Debug/2b735632/x86/CMakeFiles/edit_cache.dir
-C:/dev/noti_mobile/android/app/.cxx/Debug/2b735632/x86/CMakeFiles/rebuild_cache.dir

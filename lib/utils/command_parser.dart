@@ -2,6 +2,7 @@ import '../models/user_connection.dart';
 import '../models/terminal_log.dart';
 import '../models/noti_alert.dart';
 import '../services/alert_service.dart';
+import '../services/notification_service.dart';
 
 class CommandContext {
   final List<UserConnection> connections;
@@ -74,6 +75,7 @@ class CommandParser {
         final ready = ctx.connections.where((u) => u.status == ConnectionStatus.ready).length;
         final busy = ctx.connections.where((u) => u.status == ConnectionStatus.busy).length;
         final offline = ctx.connections.where((u) => u.status == ConnectionStatus.offline).length;
+        final fcmActive = NotificationService().isFirebaseInitialized;
 
         return CommandExecutionResult(
           logsToAppend: [
@@ -83,7 +85,8 @@ class CommandParser {
               text: '> SYS_DIAGNOSTICS: OPTIMAL\n'
                   '> NETWORK_NODES: ${ctx.connections.length} TOTAL ($ready READY, $busy BUSY, $offline OFFLINE)\n'
                   '> ENCRYPTION: 4096-BIT RSA / ACTIVE\n'
-                  '> ALERT_SERVICE: ONLINE (REPOS: MOCK_ADAPTER)',
+                  '> ALERT_SERVICE: ONLINE (REPOS: MOCK_ADAPTER)\n'
+                  '> FCM_SERVICE: ${fcmActive ? 'ACTIVE' : 'STANDBY (PENDING_CONNECT)'}',
             ),
           ],
         );
