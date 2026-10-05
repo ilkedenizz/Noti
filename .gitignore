@@ -1,0 +1,43 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ-related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Android Studio-related
+.gradle/
+build/
+captures/
+gradlew
+gradlew.bat
+local.properties
+
+# Visual Studio Code-related
+.vscode/
+
+# Flutter/Dart-related
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+
+# Symbol files
+*.symbols
+
+# Obfuscation map files
+app.*.map*
