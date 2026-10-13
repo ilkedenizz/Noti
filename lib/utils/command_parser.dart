@@ -64,7 +64,10 @@ class CommandParser {
               text: 'AVAILABLE COMMANDS:\n'
                   '  /help                             - Show available commands\n'
                   '  /status                           - Show detailed system status\n'
-                  '  /users                            - List connected users and status\n'
+                  '  /users                            - List connected peers and status\n'
+                  '  /alerts                           - Show alert dispatch and receive history\n'
+                  '  /retry <alert_id>                 - Retry dispatching a failed alert\n'
+                  '  /permit                           - Request Android notification permission\n'
                   '  /send_alert [--emergency] @user   - Dispatch alert signal (Normal/Emergency)\n'
                   '  /clear                            - Clear terminal log output',
             ),
@@ -76,6 +79,7 @@ class CommandParser {
         final busy = ctx.connections.where((u) => u.status == ConnectionStatus.busy).length;
         final offline = ctx.connections.where((u) => u.status == ConnectionStatus.offline).length;
         final fcmActive = NotificationService().isFirebaseInitialized;
+        final hasPermission = NotificationService().hasNotificationPermission;
 
         return CommandExecutionResult(
           logsToAppend: [
@@ -86,7 +90,8 @@ class CommandParser {
                   '> NETWORK_NODES: ${ctx.connections.length} TOTAL ($ready READY, $busy BUSY, $offline OFFLINE)\n'
                   '> ENCRYPTION: 4096-BIT RSA / ACTIVE\n'
                   '> ALERT_SERVICE: ONLINE (REPOS: MOCK_ADAPTER)\n'
-                  '> FCM_SERVICE: ${fcmActive ? 'ACTIVE' : 'STANDBY (PENDING_CONNECT)'}',
+                  '> FCM_SERVICE: ${fcmActive ? 'ACTIVE' : 'STANDBY (PENDING_CONNECT)'}\n'
+                  '> NOTIF_CHANNEL: [EMERGENCY_READY] (PERMISSION: ${hasPermission ? 'GRANTED' : 'REQUIRED'})',
             ),
           ],
         );
@@ -111,6 +116,92 @@ class CommandParser {
           actionType: CommandActionType.clearLogs,
           logsToAppend: [],
         );
+
+      case '/permit':
+        final granted = await NotificationService().requestNotificationPermission();
+        return CommandExecutionResult(
+          logsToAppend: [
+            commandLog,
+            LogOutput(
+              type: granted ? LogType.success : LogType.error,
+              text: granted
+                  ? '> PERMISSION_GRANTED: Notification and emergency channel active.'
+                  : '> PERMISSION_DENIED: Android notification permission was not granted.',
+            ),
+          ],
+        );
+
+      case '/alerts':
+      case '/history':
+        final history = await AlertService().getAlertHistory();
+        if (history.isEmpty) {
+          return CommandExecutionResult(
+            logsToAppend: [
+              commandLog,
+              const LogOutput(
+                type: LogType.output,
+                text: '> ALERT_HISTORY: No alerts recorded yet.',
+              ),
+            ],
+          );
+        }
+
+        final alertLines = history.take(8).map((a) {
+          final time = '${a.createdAt.hour.toString().padLeft(2, '0')}:${a.createdAt.minute.toString().padLeft(2, '0')}:${a.createdAt.second.toString().padLeft(2, '0')}';
+          return '  [${a.priority.label.padRight(9)}] -> ${a.recipientUsername.padRight(8)} '
+              'STATUS: ${a.status.label.padRight(9)} TIME: $time ID: ${a.id}';
+        }).join('\n');
+
+        return CommandExecutionResult(
+          logsToAppend: [
+            commandLog,
+            LogOutput(
+              type: LogType.output,
+              text: '> RECENT ALERTS (${history.length}):\n$alertLines',
+            ),
+          ],
+        );
+
+      case '/retry':
+        if (rawArgs.isEmpty) {
+          return CommandExecutionResult(
+            logsToAppend: [
+              commandLog,
+              const LogOutput(
+                type: LogType.error,
+                text: '> ERROR: MISSING_ALERT_ID. Usage: /retry <alert_id>',
+              ),
+            ],
+          );
+        }
+
+        final targetAlertId = rawArgs[0];
+        try {
+          final retried = await AlertService().retryAlert(targetAlertId);
+          return CommandExecutionResult(
+            logsToAppend: [
+              commandLog,
+              LogOutput(
+                type: retried.status == NotiAlertStatus.sent ? LogType.success : LogType.error,
+                text: '[RETRY_DISPATCH]\n'
+                    'ID: ${retried.id}\n'
+                    'TARGET: ${retried.recipientUsername}\n'
+                    'PRIORITY: ${retried.priority.label}\n'
+                    'STATUS: ${retried.status.label}',
+              ),
+            ],
+          );
+        } catch (e) {
+          return CommandExecutionResult(
+            logsToAppend: [
+              commandLog,
+              LogOutput(
+                type: LogType.error,
+                text: '> ERROR: RETRY_FAILED: $e',
+              ),
+            ],
+          );
+        }
 
       case '/send_alert':
         if (rawArgs.isEmpty) {

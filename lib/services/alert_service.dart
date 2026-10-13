@@ -44,7 +44,7 @@ class AlertService {
 
     try {
       final sentAlert = await _repository.sendAlert(initialAlert);
-      
+
       // Notify local listeners & trigger notification channel
       await NotificationService().showLocalAlert(sentAlert);
 
@@ -60,5 +60,17 @@ class AlertService {
       } catch (_) {}
       return failedAlert;
     }
+  }
+
+  Future<List<NotiAlert>> getAlertHistory() async {
+    return _repository.getHistory();
+  }
+
+  Future<NotiAlert> retryAlert(String alertId) async {
+    final retried = await _repository.retryAlert(alertId);
+    if (retried.status == NotiAlertStatus.sent) {
+      await NotificationService().showLocalAlert(retried);
+    }
+    return retried;
   }
 }

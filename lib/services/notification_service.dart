@@ -13,13 +13,17 @@ class AndroidEmergencyChannel {
   static const bool enableVibration = true;
   static const bool enableSound = true;
 
-  static const AndroidNotificationChannel channel = AndroidNotificationChannel(
+  static final Int64List vibrationPattern =
+      Int64List.fromList([0, 500, 200, 500, 200, 1000]);
+
+  static final AndroidNotificationChannel channel = AndroidNotificationChannel(
     id,
     name,
     description: description,
     importance: Importance.max,
     playSound: enableSound,
     enableVibration: enableVibration,
+    vibrationPattern: vibrationPattern,
   );
 }
 
@@ -45,9 +49,11 @@ class NotificationService {
   NotificationService._internal();
 
   final StreamController<NotiAlert> _alertStreamController = StreamController<NotiAlert>.broadcast();
+  final StreamController<NotiAlert> _notificationTapStreamController = StreamController<NotiAlert>.broadcast();
   final StreamController<String> _tokenRefreshStreamController = StreamController<String>.broadcast();
 
   Stream<NotiAlert> get alertStream => _alertStreamController.stream;
+  Stream<NotiAlert> get notificationTapStream => _notificationTapStreamController.stream;
   Stream<String> get onTokenRefresh => _tokenRefreshStreamController.stream;
 
   FirebaseMessaging? _messaging;
@@ -55,9 +61,16 @@ class NotificationService {
 
   String? _fcmToken;
   bool _isFirebaseInitialized = false;
+  bool _hasNotificationPermission = false;
+
+  // Deduplication cache and in-memory alert history
+  final Set<String> _processedAlertIds = <String>{};
+  final List<NotiAlert> _recentAlerts = <NotiAlert>[];
 
   bool get isFirebaseInitialized => _isFirebaseInitialized;
+  bool get hasNotificationPermission => _hasNotificationPermission;
   String? get fcmToken => _fcmToken;
+  List<NotiAlert> get recentAlerts => List.unmodifiable(_recentAlerts);
 
   /// Initializes Android notification channels, Flutter Local Notifications, and Firebase Messaging safely.
   Future<void> initialize() async {
@@ -84,6 +97,16 @@ class NotificationService {
         initializationSettings,
         onDidReceiveNotificationResponse: (NotificationResponse response) {
           debugPrint('> NOTIFICATION_TAP_RECEIVED: ${response.payload}');
+          final payloadId = response.payload;
+          if (payloadId != null) {
+            final matched = _recentAlerts.cast<NotiAlert?>().firstWhere(
+                  (a) => a?.id == payloadId,
+                  orElse: () => null,
+                );
+            if (matched != null) {
+              _notificationTapStreamController.add(matched);
+            }
+          }
         },
       );
 
@@ -108,7 +131,7 @@ class NotificationService {
       debugPrint('> FIREBASE_INIT_STATUS: SUCCESS (APP: ${Firebase.app().name})');
 
       // Request notification permissions
-      await requestNotificationPermission();
+      _hasNotificationPermission = await requestNotificationPermission();
 
       // Configure background message handler
       FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
@@ -122,6 +145,8 @@ class NotificationService {
       // Handle notification tap when app is in background
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
         debugPrint('> FCM_MSG_OPENED_APP: ${message.messageId}');
+        final alert = _parseMessageToAlert(message);
+        _notificationTapStreamController.add(alert);
         handleRemoteMessage(message, isBackground: false);
       });
 
@@ -129,6 +154,8 @@ class NotificationService {
       final initialMessage = await _messaging?.getInitialMessage();
       if (initialMessage != null) {
         debugPrint('> FCM_INITIAL_MSG_RECEIVED: ${initialMessage.messageId}');
+        final alert = _parseMessageToAlert(initialMessage);
+        _notificationTapStreamController.add(alert);
         handleRemoteMessage(initialMessage, isBackground: false);
       }
 
@@ -157,8 +184,10 @@ class NotificationService {
           sound: true,
           provisional: false,
         );
+        _hasNotificationPermission =
+            settings.authorizationStatus == AuthorizationStatus.authorized;
         debugPrint('> NOTIFICATION_PERMISSION_STATUS: ${settings.authorizationStatus}');
-        return settings.authorizationStatus == AuthorizationStatus.authorized;
+        return _hasNotificationPermission;
       }
     } catch (e) {
       debugPrint('> NOTIFICATION_PERMISSION_ERROR: $e');
@@ -188,10 +217,8 @@ class NotificationService {
     return await getToken();
   }
 
-  /// Parses incoming FCM RemoteMessage and maps to NotiAlert model & triggers notification
-  Future<void> handleRemoteMessage(RemoteMessage message, {bool isBackground = false}) async {
+  NotiAlert _parseMessageToAlert(RemoteMessage message) {
     final data = message.data;
-    
     final alertId = data['alertId'] ?? message.messageId ?? 'fcm_${DateTime.now().millisecondsSinceEpoch}';
     final senderId = data['senderId'] ?? 'fcm_sender';
     final senderUsername = data['senderUsername'] ?? '@remote_user';
@@ -202,7 +229,7 @@ class NotificationService {
     final rawPriority = (data['priority'] ?? 'NORMAL').toString().toUpperCase();
     final priority = rawPriority == 'EMERGENCY' ? NotiAlertPriority.emergency : NotiAlertPriority.normal;
     final createdAtStr = data['createdAt'] ?? DateTime.now().toIso8601String();
-    
+
     DateTime createdAt;
     try {
       createdAt = DateTime.parse(createdAtStr);
@@ -210,7 +237,7 @@ class NotificationService {
       createdAt = DateTime.now();
     }
 
-    final alert = NotiAlert(
+    return NotiAlert(
       id: alertId,
       senderId: senderId,
       senderUsername: senderUsername,
@@ -222,6 +249,24 @@ class NotificationService {
       priority: priority,
       status: NotiAlertStatus.delivered,
     );
+  }
+
+  /// Parses incoming FCM RemoteMessage, performs deduplication, maps to NotiAlert model & triggers notification
+  Future<void> handleRemoteMessage(RemoteMessage message, {bool isBackground = false}) async {
+    final alert = _parseMessageToAlert(message);
+
+    // Deduplication check
+    if (_processedAlertIds.contains(alert.id)) {
+      debugPrint('> FCM_DUPLICATE_ALERT_DROPPED: ${alert.id}');
+      return;
+    }
+
+    _processedAlertIds.add(alert.id);
+    if (_processedAlertIds.length > 250) {
+      _processedAlertIds.remove(_processedAlertIds.first);
+    }
+
+    _recordAlert(alert);
 
     // Emit alert to UI stream listeners
     await showLocalAlert(alert);
@@ -229,6 +274,13 @@ class NotificationService {
     // If app is in foreground or message notification is present, show Android local notification
     if (!isBackground) {
       await _displayAndroidLocalNotification(alert);
+    }
+  }
+
+  void _recordAlert(NotiAlert alert) {
+    _recentAlerts.insert(0, alert);
+    if (_recentAlerts.length > 100) {
+      _recentAlerts.removeLast();
     }
   }
 
@@ -244,7 +296,8 @@ class NotificationService {
       priority: Priority.high,
       playSound: true,
       enableVibration: true,
-      ticker: 'NOTI ALERT',
+      vibrationPattern: AndroidEmergencyChannel.vibrationPattern,
+      ticker: '[NOTI EMERGENCY ALERT]',
     );
 
     final notificationDetails = NotificationDetails(android: androidDetails);
@@ -265,12 +318,14 @@ class NotificationService {
 
   /// Dispatches alert to UI stream
   Future<bool> showLocalAlert(NotiAlert alert) async {
+    _recordAlert(alert);
     _alertStreamController.add(alert);
     return true;
   }
 
   void dispose() {
     _alertStreamController.close();
+    _notificationTapStreamController.close();
     _tokenRefreshStreamController.close();
   }
 }

@@ -43,4 +43,26 @@ class MockAlertRepository implements AlertRepository {
     _alerts[alertId] = updated;
     return updated;
   }
+
+  @override
+  Future<List<NotiAlert>> getHistory() async {
+    return _alerts.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  @override
+  Future<NotiAlert> retryAlert(String alertId) async {
+    final alert = _alerts[alertId];
+    if (alert == null) {
+      throw Exception('Alert $alertId not found');
+    }
+    await Future.delayed(const Duration(milliseconds: 30));
+    final retried = alert.copyWith(
+      status: NotiAlertStatus.sent,
+      failureReason: null,
+      createdAt: DateTime.now(),
+    );
+    _alerts[alertId] = retried;
+    return retried;
+  }
 }

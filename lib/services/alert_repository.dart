@@ -5,4 +5,6 @@ abstract class AlertRepository {
   Future<NotiAlert?> receiveAlert(String alertId);
   Future<NotiAlert> markDelivered(String alertId);
   Future<NotiAlert> markFailed(String alertId, String reason);
+  Future<List<NotiAlert>> getHistory();
+  Future<NotiAlert> retryAlert(String alertId);
 }

@@ -1,6 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/terminal_log.dart';
 import '../models/user_connection.dart';
+import '../models/noti_alert.dart';
+import '../services/notification_service.dart';
 import '../utils/command_parser.dart';
 
 class CommandTerminalWidget extends StatefulWidget {
@@ -26,6 +30,12 @@ class _CommandTerminalWidgetState extends State<CommandTerminalWidget> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
 
+  StreamSubscription<NotiAlert>? _alertSubscription;
+  StreamSubscription<NotiAlert>? _tapSubscription;
+
+  final List<String> _commandHistory = [];
+  int _historyIndex = 0;
+
   final List<TerminalLogItem> _logs = [
     TerminalLogItem(
       id: 'init-1',
@@ -40,6 +50,56 @@ class _CommandTerminalWidgetState extends State<CommandTerminalWidget> {
       timestamp: DateTime.now(),
     ),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _setupNotificationListeners();
+  }
+
+  void _setupNotificationListeners() {
+    _alertSubscription = NotificationService().alertStream.listen((alert) {
+      if (!mounted) return;
+      final time =
+          '${alert.createdAt.hour.toString().padLeft(2, '0')}:${alert.createdAt.minute.toString().padLeft(2, '0')}:${alert.createdAt.second.toString().padLeft(2, '0')}';
+      final isEmergency = alert.priority == NotiAlertPriority.emergency;
+
+      final logItem = TerminalLogItem(
+        id: 'rx_${DateTime.now().millisecondsSinceEpoch}_${alert.id}',
+        type: isEmergency ? LogType.error : LogType.output,
+        text: '[ALERT RECEIVED]\n'
+            'TARGET: ${alert.recipientUsername}\n'
+            'FROM: ${alert.senderUsername}\n'
+            'PRIORITY: ${alert.priority.label}\n'
+            'TITLE: ${alert.title}\n'
+            'MSG: ${alert.message}\n'
+            'TIME: $time\n'
+            'ID: ${alert.id}',
+        timestamp: DateTime.now(),
+      );
+
+      setState(() {
+        _logs.add(logItem);
+      });
+      _scrollToBottom();
+    });
+
+    _tapSubscription = NotificationService().notificationTapStream.listen((alert) {
+      if (!mounted) return;
+      final logItem = TerminalLogItem(
+        id: 'tap_${DateTime.now().millisecondsSinceEpoch}_${alert.id}',
+        type: LogType.success,
+        text: '> NOTIFICATION_INTERACTION: Direct alert focus [${alert.id}] from ${alert.senderUsername}.',
+        timestamp: DateTime.now(),
+      );
+
+      setState(() {
+        _logs.add(logItem);
+      });
+      _scrollToBottom();
+      _focusNode.requestFocus();
+    });
+  }
 
   @override
   void didUpdateWidget(covariant CommandTerminalWidget oldWidget) {
@@ -63,9 +123,54 @@ class _CommandTerminalWidgetState extends State<CommandTerminalWidget> {
     });
   }
 
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _navigateHistory(true);
+        return KeyEventResult.handled;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _navigateHistory(false);
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _navigateHistory(bool up) {
+    if (_commandHistory.isEmpty) return;
+    if (up) {
+      if (_historyIndex > 0) {
+        _historyIndex--;
+      } else {
+        _historyIndex = 0;
+      }
+      _controller.text = _commandHistory[_historyIndex];
+      _controller.selection = TextSelection.fromPosition(
+        TextPosition(offset: _controller.text.length),
+      );
+    } else {
+      if (_historyIndex < _commandHistory.length - 1) {
+        _historyIndex++;
+        _controller.text = _commandHistory[_historyIndex];
+        _controller.selection = TextSelection.fromPosition(
+          TextPosition(offset: _controller.text.length),
+        );
+      } else {
+        _historyIndex = _commandHistory.length;
+        _controller.clear();
+      }
+    }
+  }
+
   void _executeCommand(String rawCmd) async {
     final trimmed = rawCmd.trim();
     if (trimmed.isEmpty) return;
+
+    // Track command in history
+    if (_commandHistory.isEmpty || _commandHistory.last != trimmed) {
+      _commandHistory.add(trimmed);
+    }
+    _historyIndex = _commandHistory.length;
 
     final result = await CommandParser.parseAndExecute(
       trimmed,
@@ -127,6 +232,8 @@ class _CommandTerminalWidgetState extends State<CommandTerminalWidget> {
 
   @override
   void dispose() {
+    _alertSubscription?.cancel();
+    _tapSubscription?.cancel();
     _controller.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -215,28 +322,31 @@ class _CommandTerminalWidgetState extends State<CommandTerminalWidget> {
                       ),
                     ),
                     Expanded(
-                      child: TextField(
-                        controller: _controller,
-                        focusNode: _focusNode,
-                        onSubmitted: _handleSubmit,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'monospace',
-                          fontSize: 12,
-                        ),
-                        cursorColor: Colors.white,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        decoration: const InputDecoration(
-                          hintText: '/send_alert @ceviz',
-                          hintStyle: TextStyle(
-                            color: Color(0xFF404040),
+                      child: Focus(
+                        onKeyEvent: _handleKeyEvent,
+                        child: TextField(
+                          controller: _controller,
+                          focusNode: _focusNode,
+                          onSubmitted: _handleSubmit,
+                          style: const TextStyle(
+                            color: Colors.white,
                             fontFamily: 'monospace',
                             fontSize: 12,
                           ),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: EdgeInsets.zero,
+                          cursorColor: Colors.white,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          decoration: const InputDecoration(
+                            hintText: '/send_alert @ceviz',
+                            hintStyle: TextStyle(
+                              color: Color(0xFF404040),
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                            ),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.zero,
+                          ),
                         ),
                       ),
                     ),
